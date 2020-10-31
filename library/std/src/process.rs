@@ -534,7 +534,7 @@ impl Command {
         Command { inner: imp::Command::new(program.as_ref()) }
     }
 
-    /// Adds an argument to pass to the program.
+    /// Adds an argument to pass to the program. 
     ///
     /// Only one argument can be passed per use. So instead of:
     ///
@@ -556,6 +556,9 @@ impl Command {
     /// To pass multiple arguments see [`args`].
     ///
     /// [`args`]: Command::args
+    ///
+    /// Note that the argument is passed to the program directly as is, so you shouldn't wrap it in quotes
+    /// or escape special characters the same way you would do that when running the program from terminal.
     ///
     /// # Examples
     ///
@@ -581,6 +584,9 @@ impl Command {
     /// To pass a single argument see [`arg`].
     ///
     /// [`arg`]: Command::arg
+    ///
+    /// Note that each argument is passed to the program directly as is, so you shouldn't wrap it in quotes
+    /// or escape special characters the same way you would do that when running the program from terminal directly.
     ///
     /// # Examples
     ///
