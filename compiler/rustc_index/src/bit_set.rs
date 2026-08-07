@@ -163,8 +163,10 @@ impl<T: Idx> DenseBitSet<T> {
     /// Returns `true` if `self` contains `elem`.
     #[inline]
     pub fn contains(&self, elem: T) -> bool {
+        // note(panstromek): this assert is not optimized out about half the time, it seems
         assert!(elem.index() < self.domain_size);
         let (word_index, mask) = word_index_and_mask(elem);
+        // note(panstromek): also pretty hot
         (self.words[word_index] & mask) != 0
     }
 
@@ -1226,6 +1228,7 @@ impl<T> Clone for MixedBitSet<T> {
     /// `clone_from`, but it works with the existing call sites and allows a
     /// faster implementation, which is important because this function is hot.
     fn clone_from(&mut self, from: &Self) {
+        // note(panstromek): this is kinda hot, too.
         match (self, from) {
             (MixedBitSet::Small(set), MixedBitSet::Small(from)) => set.clone_from(from),
             (MixedBitSet::Large(set), MixedBitSet::Large(from)) => set.clone_from(from),
@@ -1734,6 +1737,7 @@ fn num_words<T: Idx>(domain_size: T) -> usize {
 
 #[inline]
 fn word_index_and_mask<T: Idx>(elem: T) -> (usize, Word) {
+    // note(panstromek): this is also hot (10M more instructions)
     let elem = elem.index();
     let word_index = elem / WORD_BITS;
     let mask = 1 << (elem % WORD_BITS);

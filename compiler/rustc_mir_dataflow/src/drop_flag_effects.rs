@@ -111,13 +111,20 @@ pub fn drop_flag_effects_for_location<'tcx, F>(
 ) where
     F: FnMut(MovePathIndex, DropFlagState),
 {
+    // note(panstromek):
+    //  we spend more time in this function body when it is called with callback that is
+    //  a closure from apply_primary_statement_effect in MaybeInitializedPlaces
+    //  ie.
+    //   <MaybeInitializedPlaces as Analysis>::apply_primary_statement_effect::{closure#0}
+    // most of that time is literaly in this fn body
+
     debug!("drop_flag_effects_for_location({:?})", loc);
 
     // first, move out of the RHS
     for mi in &move_data.move_out_loc_map[loc] {
         let path = mi.move_path_index(move_data);
         debug!("moving out of path {:?}", move_data.move_paths[path]);
-
+        // on_all_children_bits is also visible, so I assume this loop is the most common?
         on_all_children_bits(move_data, path, |mpi| callback(mpi, DropFlagState::Absent))
     }
 

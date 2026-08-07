@@ -50,13 +50,16 @@ pub(super) fn generate<'tcx>(
     if typeck.tcx().sess.opts.unstable_opts.polonius.is_next_enabled() {
         let (_, boring_locals) =
             compute_relevant_live_locals(typeck.tcx(), &free_regions, typeck.body);
-        typeck.polonius_context.as_mut().unwrap().boring_nll_locals =
-            boring_locals.into_iter().collect();
+        // note(panstromek) we could probably get rid of this clone (Vec->HashSet)
+        typeck.polonius_context.as_mut().unwrap().boring_nll_locals = boring_locals.into_iter().collect();
         free_regions = typeck.universal_regions.universal_regions_iter().collect();
     }
+
+    // note(panstromek): this must compute something more expensive to make the following call more expensive
     let (relevant_live_locals, boring_locals) =
         compute_relevant_live_locals(typeck.tcx(), &free_regions, typeck.body);
 
+    // note(panstromek): this call is more expensive in polonius case (matches the comment above)
     trace::trace(typeck, location_map, move_data, relevant_live_locals, boring_locals);
 
     // Mark regions that should be live where they appear within rvalues or within a call: like

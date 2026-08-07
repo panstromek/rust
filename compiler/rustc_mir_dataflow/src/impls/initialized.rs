@@ -371,6 +371,8 @@ impl<'tcx> Analysis<'tcx> for MaybeInitializedPlaces<'_, 'tcx> {
         statement: &mir::Statement<'tcx>,
         location: Location,
     ) {
+        // note(panstromek) we also spend more time in some closure in this body
+
         drop_flag_effects_for_location(self.body, self.move_data, location, |path, s| {
             Self::update_bits(state, path, s)
         });

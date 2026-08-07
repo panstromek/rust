@@ -44,6 +44,8 @@ pub(super) fn trace<'tcx>(
     relevant_live_locals: Vec<Local>,
     boring_locals: Vec<Local>,
 ) {
+    // note(panstromek: we spend more time in this function body
+
     let local_use_map = &LocalUseMap::build(&relevant_live_locals, location_map, typeck.body);
     let cx = LivenessContext {
         typeck,
@@ -494,6 +496,7 @@ impl<'a, 'typeck, 'tcx> LivenessContext<'a, 'typeck, 'tcx> {
 
 impl<'tcx> LivenessContext<'_, '_, 'tcx> {
     fn body(&self) -> &Body<'tcx> {
+        // note(panstromek): this is accessesd called a lot more times. I wonder why
         self.typeck.body
     }
 

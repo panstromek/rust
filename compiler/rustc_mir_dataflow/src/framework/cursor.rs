@@ -169,6 +169,8 @@ where
     }
 
     fn seek_after(&mut self, target: Location, effect: Effect) {
+        // note(panstromek) we also spend more time in this function body (probably the first closure#0?)
+
         assert!(target <= self.body.terminator_loc(target.block));
 
         // Reset to the entry of the target block if any of the following are true:

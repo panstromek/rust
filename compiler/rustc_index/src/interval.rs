@@ -73,7 +73,11 @@ impl<I: Idx> IntervalSet<I> {
 
     /// Returns true if we increased the number of elements present.
     pub fn insert_range(&mut self, range: impl RangeBounds<I> + Clone) -> bool {
+        // note(panstromek): we spend a ton more time here in this fn body
+
         let start = inclusive_start(range.clone());
+        // note(panstromek): I wonder whether it make sense to avoid these conditions and
+        //  somehow enforce these during construction, because these two branchesa are almost always dead
         let Some(end) = inclusive_end(self.domain, range) else {
             // empty range
             return false;
@@ -96,6 +100,8 @@ impl<I: Idx> IntervalSet<I> {
                 if start < prev_start {
                     // The first range which ends *non-adjacently* to our start.
                     // And we can ensure that left <= right.
+
+                    // note(panstromek): this following line seems to be the hottest
                     let left = self.map.partition_point(|l| l.1 + 1 < start);
                     let min = std::cmp::min(self.map[left].0, start);
                     let max = std::cmp::max(prev_end, end);
@@ -331,6 +337,7 @@ impl<I: Idx> IntervalSet<I> {
 
     // Check the intervals are valid, sorted and non-adjacent
     fn check_invariants(&self) -> bool {
+        // fixme this fn is hot but I have debug asserts disabled, what's going on??
         let mut current: Option<u32> = None;
         for (start, end) in &self.map {
             if start > end || current.is_some_and(|x| x + 1 >= *start) {
