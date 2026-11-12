@@ -215,8 +215,8 @@ impl<'a, 'tcx> CfgSimplifier<'a, 'tcx> {
     /// * the block has statements
     /// * the block has a terminator other than `goto`
     /// * the block has no terminator (meaning some other part of the current optimization stole it)
-    fn take_terminator_if_simple_goto(bbs: &mut IndexSlice<BasicBlock, BasicBlockData<'tcx>>, bb: BasicBlock) -> Option<Terminator<'tcx>> {
-        match bbs[bb] {
+    fn take_terminator_if_simple_goto(blocks: &mut IndexSlice<BasicBlock, BasicBlockData<'tcx>>, bb: BasicBlock) -> Option<Terminator<'tcx>> {
+        match blocks[bb] {
             BasicBlockData {
                 ref statements,
                 terminator:
