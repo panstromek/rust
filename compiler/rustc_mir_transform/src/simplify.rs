@@ -111,6 +111,70 @@ struct CfgSimplifier<'a, 'tcx> {
     pred_count: IndexVec<BasicBlock, u32>,
 }
 
+struct PatchedBlocks<'a, 'tcx> {
+    left: &'a mut IndexSlice<BasicBlock, BasicBlockData<'tcx>>,
+    stmts: &'a mut Vec<Statement<'tcx>>,
+    right: &'a mut IndexSlice<BasicBlock, BasicBlockData<'tcx>>,
+}
+
+impl<'a, 'tcx> PatchedBlocks<'a, 'tcx> {
+    fn statements(&self, idx: BasicBlock) -> &Vec<Statement<'tcx>> {
+        if idx.index() < self.left.len() {
+            return &self.left[idx].statements;
+        }
+        if idx.index() > self.left.len() {
+            return &self.right[BasicBlock::from_usize(idx.index() - self.left.len())].statements;
+        }
+        if idx.index() == self.left.len() {
+            return self.stmts;
+        }
+        unreachable!()
+    }
+
+    fn statements_mut(&mut self, idx: BasicBlock) -> &mut Vec<Statement<'tcx>> {
+        if idx.index() < self.left.len() {
+            return &mut self.left[idx].statements;
+        }
+        if idx.index() > self.left.len() {
+            return &mut self.right[BasicBlock::from_usize(idx.index() - self.left.len())].statements;
+        }
+        if idx.index() == self.left.len() {
+            return self.stmts;
+        }
+        unreachable!()
+    }
+
+    fn take_terminator(&mut self, idx: BasicBlock) -> Option<Terminator<'tcx>> {
+        if idx.index() < self.left.len() {
+            return self.left[idx].terminator.take();
+        }
+        if idx.index() > self.left.len() {
+            return self.right[BasicBlock::from_usize(idx.index() - self.left.len())].terminator.take();
+        }
+        if idx.index() == self.left.len() {
+            return None;
+        }
+        unreachable!()
+    }
+}
+
+
+pub fn split_by_terminator<'a, 'tcx>(
+    basic_blocks: &'a mut IndexSlice<BasicBlock, BasicBlockData<'tcx>>,
+    bb: BasicBlock
+) -> (&'a mut Terminator<'tcx>, PatchedBlocks<'a, 'tcx>) {
+    let (left, rest) = basic_blocks.raw.split_at_mut(bb.index());
+    let (curr, right) = rest.split_at_mut(1);
+    let BasicBlockData { terminator, statements, .. } = &mut curr[0];
+    let terminator = terminator.as_mut().expect("invalid terminator state");
+
+    (terminator, PatchedBlocks {
+        left: IndexSlice::from_raw_mut(left),
+        stmts: statements,
+        right: IndexSlice::from_raw_mut(right)
+    })
+}
+
 impl<'a, 'tcx> CfgSimplifier<'a, 'tcx> {
     fn new(tcx: TyCtxt<'tcx>, body: &'a mut Body<'tcx>) -> Self {
         let mut pred_count = IndexVec::from_elem(0u32, &body.basic_blocks);
@@ -158,13 +222,11 @@ impl<'a, 'tcx> CfgSimplifier<'a, 'tcx> {
 
                 debug!("simplifying {:?}", bb);
 
-                let basic_blocks = self.basic_blocks;
-
-                let mut terminator =
-                    basic_blocks[bb].terminator.take().expect("invalid terminator state");
+                let basic_blocks_ = self.basic_blocks;
+                let (terminator, basic_blocks) = split_by_terminator(basic_blocks_, bb);
 
                 terminator.successors_mut(|successor| {
-                    Self::collapse_goto_chain(successor, &mut changed, basic_blocks, &mut self.pred_count);
+                    Self::collapse_goto_chain(successor, &mut changed, &mut basic_blocks, &mut self.pred_count);
                 });
 
                 let mut inner_changed = true;
@@ -172,14 +234,15 @@ impl<'a, 'tcx> CfgSimplifier<'a, 'tcx> {
                 while inner_changed {
                     inner_changed = false;
                     inner_changed |= Self::simplify_branch(&mut terminator, self.preserve_switch_reads, &mut self.pred_count);
-                    inner_changed |= Self::merge_successor(&mut merged_blocks, &mut terminator, basic_blocks, &mut self.pred_count);
+                    inner_changed |= Self::merge_successor(&mut merged_blocks, &mut terminator, &mut basic_blocks, &mut self.pred_count);
                     changed |= inner_changed;
                 }
 
                 let statements_to_merge =
-                    merged_blocks.iter().map(|&i| basic_blocks[i].statements.len()).sum();
+                    merged_blocks.iter().map(|&i| basic_blocks.statements(i).len()).sum();
 
                 if statements_to_merge > 0 {
+                    let basic_blocks = basic_blocks_;
                     let mut statements = std::mem::take(&mut basic_blocks[bb].statements);
                     statements.reserve(statements_to_merge);
                     let mut parent_bb_last_debuginfos =
@@ -196,9 +259,9 @@ impl<'a, 'tcx> CfgSimplifier<'a, 'tcx> {
                     basic_blocks[bb].after_last_stmt_debuginfos = parent_bb_last_debuginfos;
                 }
 
-                basic_blocks[bb].terminator = Some(terminator);
+                // basic_blocks[bb].terminator = Some(terminator);
 
-                self.basic_blocks = basic_blocks;
+                self.basic_blocks = basic_blocks_;
             }
 
             if !changed {
@@ -215,9 +278,9 @@ impl<'a, 'tcx> CfgSimplifier<'a, 'tcx> {
     /// * the block has statements
     /// * the block has a terminator other than `goto`
     /// * the block has no terminator (meaning some other part of the current optimization stole it)
-    fn take_terminator_if_simple_goto(blocks: &mut IndexSlice<BasicBlock, BasicBlockData<'tcx>>, bb: BasicBlock) -> Option<Terminator<'tcx>> {
-        match blocks[bb] {
-            BasicBlockData {
+    fn take_terminator_if_simple_goto(blocks: &mut PatchedBlocks<'_, 'tcx>, bb: BasicBlock) -> Option<Terminator<'tcx>> {
+        match blocks.get(bb) {
+            BlockView {
                 ref statements,
                 terminator:
                     ref mut terminator @ Some(Terminator { kind: TerminatorKind::Goto { .. }, .. }),
@@ -233,7 +296,7 @@ impl<'a, 'tcx> CfgSimplifier<'a, 'tcx> {
     fn collapse_goto_chain(
         start: &mut BasicBlock,
         changed: &mut bool,
-        blocks: &mut IndexSlice<BasicBlock, BasicBlockData<'tcx>>,
+        blocks: &mut PatchedBlocks<'a, 'tcx>,
         pred_counts: &mut IndexVec<BasicBlock, u32>
     ) {
         // Using `SmallVec` here, because in some logs on libcore oli-obk saw many single-element
@@ -262,7 +325,7 @@ impl<'a, 'tcx> CfgSimplifier<'a, 'tcx> {
             if trivial_goto_chain {
                 let mut pred_debuginfos =
                     std::mem::take(&mut blocks[current].after_last_stmt_debuginfos);
-                let debuginfos = if let Some(stmt) = blocks[last].statements.first_mut()
+                let debuginfos = if let Some(stmt) = blocks.statements_mut(last).first_mut()
                 {
                     &mut stmt.debuginfos
                 } else {
@@ -290,7 +353,7 @@ impl<'a, 'tcx> CfgSimplifier<'a, 'tcx> {
     fn merge_successor(
         merged_blocks: &mut Vec<BasicBlock>,
         terminator: &mut Terminator<'tcx>,
-        basic_blocks: &mut IndexSlice<BasicBlock, BasicBlockData<'tcx>>,
+        basic_blocks: &mut PatchedBlocks<'a, 'tcx>,
         pred_counts: &mut IndexSlice<BasicBlock, u32>,
     ) -> bool {
         let target = match terminator.kind {
@@ -299,7 +362,7 @@ impl<'a, 'tcx> CfgSimplifier<'a, 'tcx> {
         };
 
         debug!("merging block {:?} into {:?}", target, terminator);
-        *terminator = match basic_blocks[target].terminator.take() {
+        *terminator = match basic_blocks.take_terminator(target) {
             Some(terminator) => terminator,
             None => {
                 // unreachable loop - this should not be possible, as we
