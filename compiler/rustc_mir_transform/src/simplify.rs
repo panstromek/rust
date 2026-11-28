@@ -206,15 +206,19 @@ impl<'a, 'tcx> CfgSimplifier<'a, 'tcx> {
     }
 
     /// Replaces the terminator of a basic block with a dummy value.
+    #[inline]
     fn take_terminator(&mut self, bb: BasicBlock) -> Option<Terminator<'tcx>> {
         if has_dummy_terminator(&self.basic_blocks[bb]) {
             return None;
         }
-        let dummy_terminator = Terminator {
-            source_info: SourceInfo { span: DUMMY_SP, scope: SourceScope::ZERO },
-            kind: TerminatorKind::Goto { target: BasicBlock::MAX, loop_hint_attrs: ThinVec::new() },
-        };
-        Some(std::mem::replace(&mut self.basic_blocks[bb].terminator, dummy_terminator))
+        let terminator = &mut self.basic_blocks[bb].terminator;
+
+        let dummy_kind =
+            TerminatorKind::Goto { target: BasicBlock::MAX, loop_hint_attrs: ThinVec::new() };
+        Some(Terminator {
+            source_info: terminator.source_info,
+            kind: std::mem::replace(&mut terminator.kind, dummy_kind),
+        })
     }
 
     /// This function will return `None` if
@@ -424,6 +428,7 @@ pub(super) fn remove_dead_blocks(body: &mut Body<'_>) {
     }
 }
 
+#[inline]
 fn has_dummy_terminator(bbdata: &BasicBlockData<'_>) -> bool {
     match bbdata.terminator.kind {
         TerminatorKind::Goto { target, .. } => target == BasicBlock::MAX,
